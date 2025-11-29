@@ -1,0 +1,8 @@
+{
+  "rules": [
+    {
+      "pathPattern": "/stake",
+      "apiPath": "/api/actions/stake-yonta"
+    }
+  ]
+}
