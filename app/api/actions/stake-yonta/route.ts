@@ -50,42 +50,41 @@ export const OPTIONS = async () => {
 export const GET = async (req: Request) => {
   const url = new URL(req.url);
 
-  const response: ActionGetResponse = {
-    type: "action",
-    title: "Stake with Yonta Labs",
-    label: "Stake SOL",
-    description:
-      "Stake SOL with the Yonta Labs validator (0% commission, Jito MEV rewards).",
-    // For now reuse Next logo so the schema is valid. You can change this to a Yonta image later.
-    icon: new URL("/next.svg", url).toString(),
-    links: {
-      actions: [
-        {
-          type: "transaction",
-          label: "Stake 1 SOL",
-          href: "/api/actions/stake-yonta?amount=1",
-        },
-        {
-          type: "transaction",
-          label: "Stake 5 SOL",
-          href: "/api/actions/stake-yonta?amount=5",
-        },
-        {
-          type: "transaction",
-          label: "Custom amount",
-          href: "/api/actions/stake-yonta?amount={amount}",
-          parameters: [
-            {
-              name: "amount",
-              label: "SOL amount",
-              type: "number",
-              min: 0.01,
-            },
-          ],
-        },
-      ],
-    },
-  };
+const response: ActionGetResponse = {
+  type: "action",
+  title: "Stake with Yonta Labs",
+  label: "Stake with Yonta",
+  description:
+    "Delegate your SOL directly to the Yonta Labs validator: 0% commission, Jito MEV, independent veteran-owned, and community-first Solana infrastructure.",
+  icon: new URL("/yonta-logo.png", url).toString(),
+  links: {
+    actions: [
+      {
+        type: "transaction",
+        label: "Stake 1 SOL",
+        href: "/api/actions/stake-yonta?amount=1",
+      },
+      {
+        type: "transaction",
+        label: "Stake 5 SOL",
+        href: "/api/actions/stake-yonta?amount=5",
+      },
+      {
+        type: "transaction",
+        label: "Choose amount",
+        href: "/api/actions/stake-yonta?amount={amount}",
+        parameters: [
+          {
+            name: "amount",
+            label: "SOL to stake",
+            type: "number",
+            min: 0.01,
+          },
+        ],
+      },
+    ],
+  },
+};
 
   return new Response(JSON.stringify(response), {
     status: 200,
