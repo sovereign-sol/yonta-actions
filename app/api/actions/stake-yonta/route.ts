@@ -22,25 +22,19 @@ const YONTA_VOTE_PUBKEY = new PublicKey(
   "BeSov1og3sEYyH9JY3ap7QcQDvVX8f4sugfNPf9YLkcV"
 );
 
-// --- HEADERS -------------------------------------------------
-// These are used for GET/POST (actual Action responses)
-const ACTION_HEADERS = {
+// --- STANDARD HEADERS FOR ALL METHODS ------------------------
+// CAIP-2 chain ID for Solana mainnet: 5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp
+// https://forum.solana.com/t/srfc-31-compatibility-of-blinks-and-actions/1892
+const HEADERS = {
   "Content-Type": "application/json",
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers":
+    "Content-Type, x-blockchain-ids, x-action-version",
+  "Access-Control-Expose-Headers": "X-Blockchain-Ids, X-Action-Version",
   "X-Action": "true",
   "X-Action-Version": "1",
-  // This is what Dialect is complaining about:
-  // identify this Action as Solana mainnet
-  "X-Blockchain-Ids": "solana:mainnet",
-};
-
-// These are used for OPTIONS (CORS preflight only)
-const OPTIONS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "X-Blockchain-Ids": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
 };
 
 // ==========================
@@ -85,7 +79,7 @@ export async function GET(req: Request) {
   };
 
   return new Response(JSON.stringify(payload), {
-    headers: ACTION_HEADERS,
+    headers: HEADERS,
   });
 }
 
@@ -93,9 +87,9 @@ export async function GET(req: Request) {
 //       OPTIONS
 // ==========================
 export async function OPTIONS() {
-  // Preflight only needs CORS, not Action metadata
+  // Preflight response: same headers so Dialect & wallets are happy
   return new Response(null, {
-    headers: OPTIONS_HEADERS,
+    headers: HEADERS,
   });
 }
 
@@ -159,18 +153,18 @@ export async function POST(req: Request) {
     if (!Number.isFinite(solAmount) || solAmount <= 0) {
       return new Response(
         JSON.stringify({ error: "Invalid stake amount" }),
-        { status: 400, headers: ACTION_HEADERS },
+        { status: 400, headers: HEADERS },
       );
     }
 
-    const body = await req.json().catch(() => null) as
+    const body = (await req.json().catch(() => null)) as
       | { account?: string }
       | null;
 
     if (!body?.account) {
       return new Response(
         JSON.stringify({ error: "Missing wallet account" }),
-        { status: 400, headers: ACTION_HEADERS },
+        { status: 400, headers: HEADERS },
       );
     }
 
@@ -190,13 +184,13 @@ export async function POST(req: Request) {
         transaction: b64,
         message: `Stake ~${solAmount} SOL with Yonta Labs`,
       }),
-      { status: 200, headers: ACTION_HEADERS },
+      { status: 200, headers: HEADERS },
     );
   } catch (err) {
     console.error("Stake-Yonta ERROR:", err);
     return new Response(
       JSON.stringify({ error: "Internal error building stake transaction" }),
-      { status: 500, headers: ACTION_HEADERS },
+      { status: 500, headers: HEADERS },
     );
   }
 }
