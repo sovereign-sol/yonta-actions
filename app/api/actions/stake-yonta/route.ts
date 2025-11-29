@@ -22,14 +22,25 @@ const YONTA_VOTE_PUBKEY = new PublicKey(
   "BeSov1og3sEYyH9JY3ap7QcQDvVX8f4sugfNPf9YLkcV"
 );
 
-// --- REQUIRED ACTION HEADERS (Fix for Phantom & Solflare) ----
+// --- HEADERS -------------------------------------------------
+// These are used for GET/POST (actual Action responses)
 const ACTION_HEADERS = {
   "Content-Type": "application/json",
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET,OPTIONS,POST",
+  "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
   "X-Action": "true",
   "X-Action-Version": "1",
+  // This is what Dialect is complaining about:
+  // identify this Action as Solana mainnet
+  "X-Blockchain-Ids": "solana:mainnet",
+};
+
+// These are used for OPTIONS (CORS preflight only)
+const OPTIONS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
 };
 
 // ==========================
@@ -82,8 +93,9 @@ export async function GET(req: Request) {
 //       OPTIONS
 // ==========================
 export async function OPTIONS() {
+  // Preflight only needs CORS, not Action metadata
   return new Response(null, {
-    headers: ACTION_HEADERS,
+    headers: OPTIONS_HEADERS,
   });
 }
 
@@ -96,8 +108,14 @@ async function buildStakeTx(params: {
   solAmount: number;
 }) {
   const { staker, votePubkey, solAmount } = params;
+
+  if (!Number.isFinite(solAmount) || solAmount <= 0) {
+    throw new Error("Invalid SOL amount");
+  }
+
   const lamports = Math.floor(solAmount * LAMPORTS_PER_SOL);
 
+  // New stake account keypair (only used to create the stake account)
   const stakeAccount = Keypair.generate();
 
   const authorized = new Authorized(staker, staker);
@@ -123,6 +141,7 @@ async function buildStakeTx(params: {
   tx.feePayer = staker;
   tx.recentBlockhash = blockhash;
 
+  // Server signs for the new stake account only
   tx.partialSign(stakeAccount);
 
   return tx;
@@ -137,19 +156,23 @@ export async function POST(req: Request) {
     const rawAmount = url.searchParams.get("amount") ?? "1";
     const solAmount = Number(rawAmount);
 
-    if (!Number.isFinite(solAmount) || solAmount <= 0)
+    if (!Number.isFinite(solAmount) || solAmount <= 0) {
       return new Response(
         JSON.stringify({ error: "Invalid stake amount" }),
-        { status: 400, headers: ACTION_HEADERS }
+        { status: 400, headers: ACTION_HEADERS },
       );
+    }
 
-    const body = await req.json().catch(() => null);
+    const body = await req.json().catch(() => null) as
+      | { account?: string }
+      | null;
 
-    if (!body?.account)
+    if (!body?.account) {
       return new Response(
         JSON.stringify({ error: "Missing wallet account" }),
-        { status: 400, headers: ACTION_HEADERS }
+        { status: 400, headers: ACTION_HEADERS },
       );
+    }
 
     const staker = new PublicKey(body.account);
 
@@ -167,13 +190,13 @@ export async function POST(req: Request) {
         transaction: b64,
         message: `Stake ~${solAmount} SOL with Yonta Labs`,
       }),
-      { status: 200, headers: ACTION_HEADERS }
+      { status: 200, headers: ACTION_HEADERS },
     );
   } catch (err) {
     console.error("Stake-Yonta ERROR:", err);
     return new Response(
       JSON.stringify({ error: "Internal error building stake transaction" }),
-      { status: 500, headers: ACTION_HEADERS }
+      { status: 500, headers: ACTION_HEADERS },
     );
   }
 }
