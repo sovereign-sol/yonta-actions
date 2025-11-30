@@ -55,7 +55,7 @@ const response: ActionGetResponse = {
   title: "Stake with Yonta Labs",
   label: "Stake with Yonta",
   description:
-    "Delegate your SOL directly to the Yonta Labs validator: 0% commission, Jito MEV, independent veteran-owned, and community-first Solana infrastructure.",
+    "Delegate your SOL directly to the Yonta Labs validator — 0% commission, Jito MEV rewards, independent and veteran-owned, built for community-first Solana infrastructure.",
   icon: new URL("/yonta-logo.png", url).toString(),
   links: {
     actions: [
