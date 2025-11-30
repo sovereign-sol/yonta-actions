@@ -16,8 +16,7 @@ import {
   PublicKey,
   StakeProgram,
   SystemProgram,
-  TransactionMessage,
-  VersionedTransaction,
+  Transaction,
 } from "@solana/web3.js";
 
 // ---------- CONFIG ----------
@@ -40,7 +39,7 @@ const YONTA_VOTE_ACCOUNT = new PublicKey(
 const headers = {
   ...ACTIONS_CORS_HEADERS,
   "X-Blockchain-Ids": blockchain,
-  "X-Action-Version": "2.4", // spec version tag
+  "X-Action-Version": "2.4", // spec version tag (string is fine)
 };
 
 // ---------- OPTIONS (CORS preflight) ----------
@@ -96,7 +95,7 @@ export const GET = async (req: Request) => {
   });
 };
 
-// ---------- HELPER: build REAL stake transaction ----------
+// ---------- HELPER: build REAL stake transaction (legacy tx) ----------
 
 async function buildStakeTransaction(payer: PublicKey, amountSol: number) {
   if (!Number.isFinite(amountSol) || amountSol <= 0) {
@@ -141,19 +140,15 @@ async function buildStakeTransaction(payer: PublicKey, amountSol: number) {
     stakePubkey,
     authorizedPubkey: payer,
     votePubkey: YONTA_VOTE_ACCOUNT,
-  });
+  }).instructions[0]; // StakeProgram.delegate returns a Transaction; take the first instruction
 
   const { blockhash } = await connection.getLatestBlockhash("finalized");
 
-  const message = new TransactionMessage({
-    payerKey: payer,
-    recentBlockhash: blockhash,
-    instructions: [createIx, initIx, delegateIx],
-  }).compileToV0Message();
+  const tx = new Transaction().add(createIx, initIx, delegateIx);
+  tx.feePayer = payer;
+  tx.recentBlockhash = blockhash;
 
-  // Only the user's wallet needs to sign this (payer)
-  const tx = new VersionedTransaction(message);
-
+  // Only the user's wallet signs this (payer)
   return tx;
 }
 
