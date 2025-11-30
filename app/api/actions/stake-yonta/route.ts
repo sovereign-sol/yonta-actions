@@ -1,4 +1,4 @@
-// file: app/api/actions/stake-yonta/route.ts
+// app/api/actions/stake-yonta/route.ts
 
 import {
   ActionGetResponse,
@@ -9,9 +9,12 @@ import {
 } from "@solana/actions";
 
 import {
+  Authorized,
   Connection,
-  PublicKey,
   LAMPORTS_PER_SOL,
+  Lockup,
+  PublicKey,
+  StakeProgram,
   SystemProgram,
   TransactionMessage,
   VersionedTransaction,
@@ -20,7 +23,10 @@ import {
 // ---------- CONFIG ----------
 
 // Solana mainnet RPC – swap for your own RPC if you want
-const connection = new Connection("https://api.mainnet-beta.solana.com", "confirmed");
+const connection = new Connection(
+  "https://api.mainnet-beta.solana.com",
+  "confirmed"
+);
 
 // CAIP-2 chain id for Solana mainnet
 const blockchain = BLOCKCHAIN_IDS.mainnet;
@@ -30,17 +36,15 @@ const YONTA_VOTE_ACCOUNT = new PublicKey(
   "BeSov1og3sEYyH9JY3ap7QcQDvVX8f4sugfNPf9YLkcV"
 );
 
-// Standard headers for Actions/Blinks, per Dialect/Solana docs
-// ACTIONS_CORS_HEADERS includes the correct CORS + OPTIONS behavior.
-// We just add metadata headers on top.
+// Standard headers for Actions/Blinks
 const headers = {
   ...ACTIONS_CORS_HEADERS,
   "X-Blockchain-Ids": blockchain,
-  "X-Action-Version": "2.4", // spec version – any valid string is fine
+  "X-Action-Version": "2.4", // spec version tag
 };
 
 // ---------- OPTIONS (CORS preflight) ----------
-// Dialect’s validator *requires* this to be present and to use the same headers.
+
 export const OPTIONS = async () => {
   return new Response(null, { headers });
 };
@@ -50,41 +54,41 @@ export const OPTIONS = async () => {
 export const GET = async (req: Request) => {
   const url = new URL(req.url);
 
-const response: ActionGetResponse = {
-  type: "action",
-  title: "Stake with Yonta Labs",
-  label: "Stake with Yonta",
-  description:
-    "Delegate your SOL directly to the Yonta Labs validator — 0% commission, Jito MEV rewards, independent and veteran-owned, built for community-first Solana infrastructure.",
-  icon: new URL("/yonta-logo.png", url).toString(),
-  links: {
-    actions: [
-      {
-        type: "transaction",
-        label: "Stake 1 SOL",
-        href: "/api/actions/stake-yonta?amount=1",
-      },
-      {
-        type: "transaction",
-        label: "Stake 5 SOL",
-        href: "/api/actions/stake-yonta?amount=5",
-      },
-      {
-        type: "transaction",
-        label: "Choose amount",
-        href: "/api/actions/stake-yonta?amount={amount}",
-        parameters: [
-          {
-            name: "amount",
-            label: "SOL to stake",
-            type: "number",
-            min: 0.01,
-          },
-        ],
-      },
-    ],
-  },
-};
+  const response: ActionGetResponse = {
+    type: "action",
+    title: "Stake with Yonta Labs",
+    label: "Stake with Yonta",
+    description:
+      "Delegate your SOL directly to the Yonta Labs validator: 0% commission, Jito MEV rewards, independent and veteran-owned, community-first Solana infrastructure.",
+    icon: new URL("/yonta-logo.png", url).toString(),
+    links: {
+      actions: [
+        {
+          type: "transaction",
+          label: "Stake 1 SOL",
+          href: "/api/actions/stake-yonta?amount=1",
+        },
+        {
+          type: "transaction",
+          label: "Stake 5 SOL",
+          href: "/api/actions/stake-yonta?amount=5",
+        },
+        {
+          type: "transaction",
+          label: "Choose amount",
+          href: "/api/actions/stake-yonta?amount={amount}",
+          parameters: [
+            {
+              name: "amount",
+              label: "SOL to stake",
+              type: "number",
+              min: 0.01,
+            },
+          ],
+        },
+      ],
+    },
+  };
 
   return new Response(JSON.stringify(response), {
     status: 200,
@@ -92,10 +96,68 @@ const response: ActionGetResponse = {
   });
 };
 
-// ---------- POST (build the transaction) ----------
-// NOTE: For now this creates a simple SOL transfer to your vote account.
-// Once Dialect is happy with CORS/spec, we can evolve this into a proper
-// stake-account + delegate flow.
+// ---------- HELPER: build REAL stake transaction ----------
+
+async function buildStakeTransaction(payer: PublicKey, amountSol: number) {
+  if (!Number.isFinite(amountSol) || amountSol <= 0) {
+    throw new Error("Invalid SOL amount");
+  }
+
+  const lamports = Math.round(amountSol * LAMPORTS_PER_SOL);
+
+  // Create a unique seed so each stake account is new
+  const seed = `yonta-${Date.now().toString()}`;
+
+  // Deterministic stake account derived from the payer + seed
+  const stakePubkey = await PublicKey.createWithSeed(
+    payer,
+    seed,
+    StakeProgram.programId
+  );
+
+  // 1) Create the stake account with seed
+  const createIx = SystemProgram.createAccountWithSeed({
+    fromPubkey: payer,
+    newAccountPubkey: stakePubkey,
+    basePubkey: payer,
+    seed,
+    lamports,
+    space: StakeProgram.space,
+    programId: StakeProgram.programId,
+  });
+
+  // 2) Initialize the stake account
+  const authorized = new Authorized(payer, payer);
+  const lockup = new Lockup(0, 0, payer);
+
+  const initIx = StakeProgram.initialize({
+    stakePubkey,
+    authorized,
+    lockup,
+  });
+
+  // 3) Delegate stake to Yonta Labs vote account
+  const delegateIx = StakeProgram.delegate({
+    stakePubkey,
+    authorizedPubkey: payer,
+    votePubkey: YONTA_VOTE_ACCOUNT,
+  });
+
+  const { blockhash } = await connection.getLatestBlockhash("finalized");
+
+  const message = new TransactionMessage({
+    payerKey: payer,
+    recentBlockhash: blockhash,
+    instructions: [createIx, initIx, delegateIx],
+  }).compileToV0Message();
+
+  // Only the user's wallet needs to sign this (payer)
+  const tx = new VersionedTransaction(message);
+
+  return tx;
+}
+
+// ---------- POST (build REAL stake tx for the wallet) ----------
 
 export const POST = async (req: Request) => {
   try {
@@ -114,26 +176,17 @@ export const POST = async (req: Request) => {
 
     // Body is the ActionPostRequest from the wallet / Blink client
     const body: ActionPostRequest = await req.json();
+
+    if (!body.account) {
+      return new Response(
+        JSON.stringify({ error: "Missing wallet account" }),
+        { status: 400, headers }
+      );
+    }
+
     const payer = new PublicKey(body.account);
 
-    const lamports = Math.round(amount * LAMPORTS_PER_SOL);
-
-    // Simple SOL transfer tx to your vote account
-    const ix = SystemProgram.transfer({
-      fromPubkey: payer,
-      toPubkey: YONTA_VOTE_ACCOUNT,
-      lamports,
-    });
-
-    const { blockhash } = await connection.getLatestBlockhash("finalized");
-
-    const message = new TransactionMessage({
-      payerKey: payer,
-      recentBlockhash: blockhash,
-      instructions: [ix],
-    }).compileToV0Message();
-
-    const tx = new VersionedTransaction(message);
+    const tx = await buildStakeTransaction(payer, amount);
 
     const actionResponse: ActionPostResponse = {
       type: "transaction",
