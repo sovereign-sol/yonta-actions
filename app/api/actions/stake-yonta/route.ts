@@ -148,13 +148,12 @@ async function buildStakeTransaction(payer: PublicKey, amountSol: number) {
     votePubkey: YONTA_VOTE_ACCOUNT,
   });
 
-  const { blockhash } = await connection.getLatestBlockhash("finalized");
+  const { blockhash } = await connection.getLatestBlockhash();
 
   const tx = new Transaction().add(createIx, initIx, delegateIx);
   tx.feePayer = payer;
   tx.recentBlockhash = blockhash;
 
-  // Only the user's wallet (payer) needs to sign
   return tx;
 }
 
@@ -196,9 +195,15 @@ export const POST = async (req: Request) => {
 
     const tx = await buildStakeTransaction(payer, amount);
 
+    // IMPORTANT: serialize without requiring signatures (wallet will sign)
+    const serializedTx = tx.serialize({
+      requireAllSignatures: false,
+      verifySignatures: false,
+    });
+
     const actionResponse: ActionPostResponse = {
       type: "transaction",
-      transaction: Buffer.from(tx.serialize()).toString("base64"),
+      transaction: Buffer.from(serializedTx).toString("base64"),
       message: `Stake ${amount} SOL with Yonta Labs (0% commission, Jito MEV).`,
     };
 
