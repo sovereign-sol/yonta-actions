@@ -21,7 +21,7 @@ import {
 
 // ---------- CONFIG ----------
 
-// Solana mainnet RPC – swap for your own RPC if you want
+// Solana mainnet RPC – you can swap for your own endpoint
 const connection = new Connection(
   "https://api.mainnet-beta.solana.com",
   "confirmed"
@@ -30,7 +30,7 @@ const connection = new Connection(
 // CAIP-2 chain id for Solana mainnet
 const blockchain = BLOCKCHAIN_IDS.mainnet;
 
-// Your vote account (Yonta Labs validator)
+// Yonta Labs vote account
 const YONTA_VOTE_ACCOUNT = new PublicKey(
   "BeSov1og3sEYyH9JY3ap7QcQDvVX8f4sugfNPf9YLkcV"
 );
@@ -39,7 +39,7 @@ const YONTA_VOTE_ACCOUNT = new PublicKey(
 const headers = {
   ...ACTIONS_CORS_HEADERS,
   "X-Blockchain-Ids": blockchain,
-  "X-Action-Version": "2.4", // spec version tag (string is fine)
+  "X-Action-Version": "2.4",
 };
 
 // ---------- OPTIONS (CORS preflight) ----------
@@ -52,6 +52,7 @@ export const OPTIONS = async () => {
 
 export const GET = async (req: Request) => {
   const url = new URL(req.url);
+  const origin = url.origin;
 
   const response: ActionGetResponse = {
     type: "action",
@@ -59,23 +60,23 @@ export const GET = async (req: Request) => {
     label: "Stake with Yonta",
     description:
       "Delegate your SOL directly to the Yonta Labs validator: 0% commission, Jito MEV rewards, independent and veteran-owned, community-first Solana infrastructure.",
-    icon: new URL("/yonta-logo.png", url).toString(),
+    icon: new URL("/yonta-logo.png", origin).toString(),
     links: {
       actions: [
         {
           type: "transaction",
           label: "Stake 1 SOL",
-          href: "/api/actions/stake-yonta?amount=1",
+          href: `${origin}/api/actions/stake-yonta?amount=1`,
         },
         {
           type: "transaction",
           label: "Stake 5 SOL",
-          href: "/api/actions/stake-yonta?amount=5",
+          href: `${origin}/api/actions/stake-yonta?amount=5`,
         },
         {
           type: "transaction",
           label: "Choose amount",
-          href: "/api/actions/stake-yonta?amount={amount}",
+          href: `${origin}/api/actions/stake-yonta?amount={amount}`,
           parameters: [
             {
               name: "amount",
@@ -95,19 +96,24 @@ export const GET = async (req: Request) => {
   });
 };
 
-// ---------- HELPER: build REAL stake transaction (legacy tx) ----------
+// ---------- HELPER: build REAL stake transaction ----------
 
 async function buildStakeTransaction(payer: PublicKey, amountSol: number) {
   if (!Number.isFinite(amountSol) || amountSol <= 0) {
     throw new Error("Invalid SOL amount");
   }
 
-  const lamports = Math.round(amountSol * LAMPORTS_PER_SOL);
+  // Rent-exempt minimum for a stake account
+  const rentExempt = await connection.getMinimumBalanceForRentExemption(
+    StakeProgram.space
+  );
 
-  // Create a unique seed so each stake account is new
+  // Total lamports = rent + user stake amount
+  const lamports = rentExempt + Math.round(amountSol * LAMPORTS_PER_SOL);
+
+  // Seed for deterministic stake account – unique enough per request
   const seed = `yonta-${Date.now().toString()}`;
 
-  // Deterministic stake account derived from the payer + seed
   const stakePubkey = await PublicKey.createWithSeed(
     payer,
     seed,
@@ -140,7 +146,7 @@ async function buildStakeTransaction(payer: PublicKey, amountSol: number) {
     stakePubkey,
     authorizedPubkey: payer,
     votePubkey: YONTA_VOTE_ACCOUNT,
-  }).instructions[0]; // StakeProgram.delegate returns a Transaction; take the first instruction
+  });
 
   const { blockhash } = await connection.getLatestBlockhash("finalized");
 
@@ -148,7 +154,7 @@ async function buildStakeTransaction(payer: PublicKey, amountSol: number) {
   tx.feePayer = payer;
   tx.recentBlockhash = blockhash;
 
-  // Only the user's wallet signs this (payer)
+  // Only the user's wallet (payer) needs to sign
   return tx;
 }
 
@@ -158,7 +164,7 @@ export const POST = async (req: Request) => {
   try {
     const url = new URL(req.url);
 
-    // Amount in SOL from querystring
+    // Amount in SOL from querystring (default: 1 SOL)
     const rawAmount = url.searchParams.get("amount") ?? "1";
     const amount = Number(rawAmount);
 
@@ -169,8 +175,15 @@ export const POST = async (req: Request) => {
       );
     }
 
-    // Body is the ActionPostRequest from the wallet / Blink client
-    const body: ActionPostRequest = await req.json();
+    let body: ActionPostRequest;
+    try {
+      body = (await req.json()) as ActionPostRequest;
+    } catch {
+      return new Response(
+        JSON.stringify({ error: "Invalid JSON body" }),
+        { status: 400, headers }
+      );
+    }
 
     if (!body.account) {
       return new Response(
@@ -186,6 +199,7 @@ export const POST = async (req: Request) => {
     const actionResponse: ActionPostResponse = {
       type: "transaction",
       transaction: Buffer.from(tx.serialize()).toString("base64"),
+      message: `Stake ${amount} SOL with Yonta Labs (0% commission, Jito MEV).`,
     };
 
     return new Response(JSON.stringify(actionResponse), {
